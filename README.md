@@ -1,48 +1,73 @@
-function filter_generator()
-% --- User Interface Input Prompts ---
+% --- User Interface Input Prompts for Components ---
 disp('=== Passive Filter Parameters Configuration ===');
-R = input('Enter Resistance R in Ohms (ex, 1000): ');
-C = input('Enter Capacitance C in Farads (ex, 1e-6): ');
-L = input('Enter Inductance L in Henries (ex, 0.25): ');
+R = input('Enter Resistance R in Ohms (e.g., 1000): ');
+C = input('Enter Capacitance C in Farads (e.g., 1e-6): ');
+L = input('Enter Inductance L in Henries (e.g., 0.25): ');
+
+% --- User Interface Input Prompts for the Varying Sinusoid ---
+disp(' ');
+disp('=== Chirp Sinusoid Frequency Vector Configuration ===');
+f_start = input('Enter Starting Frequency in Hz (e.g., 10): ');
+f_end   = input('Enter Ending Frequency in Hz (e.g., 1000): ');
+t_duration = input('Enter Signal Duration in seconds (e.g., 0.5): ');
 disp('===============================================');
 
-% Calculate frequencies
-fc = 1 / (2 * pi * R * C);          % Cutoff for LP and HP
-f0 = 1 / (2 * pi * sqrt(L * C));   % Center/Notch frequency for BP and BS
+% --- Build Time and Varying Frequency Vectors ---
+% Sampling frequency must be at least 20x higher than the highest frequency
+fs = max(10000, f_end * 20); 
+dt = 1 / fs;
+t = 0:dt:t_duration; % Time vector from 0 to total duration
 
-% Display calculated key frequencies to the user
-fprintf('\nCalculated Cutoff Frequency (fc) for LP/HP: %.2f Hz\n', fc);
-fprintf('Calculated Center Frequency (f0) for BP/BS: %.2f Hz\n\n', f0);
+% Create a sinusoidal signal that varies linearly in frequency from start to finish
+input_signal = sin(2 * pi * (f_start + (f_end - f_start) * t / (2 * t_duration)) .* t);
 
-% 1. Low-Pass Filter Transfer Function: 1 / (RC*s + 1)
-num_lp = 1;
-den_lp = [R*C, 1];
-sys_lp = tf(num_lp, den_lp);
+% --- Define Transfer Functions ---
+sys_lp = tf(1, [R*C, 1]);
+sys_hp = tf([R*C, 0], [R*C, 1]);
+sys_bp = tf([R/L, 0], [1, R/L, 1/(L*C)]);
+sys_bs = tf([1, 0, 1/(L*C)], [1, R/L, 1/(L*C)]);
 
-% 2. High-Pass Filter Transfer Function: RC*s / (RC*s + 1)
-num_hp = [R*C, 0];
-den_hp = [R*C, 1];
-sys_hp = tf(num_hp, den_hp);
+% --- Interactive Menu Selection ---
+filter_options = {'Low-Pass Filter Only', ...
+    'High-Pass Filter Only', ...
+    'Bandpass Filter Only', ...
+    'Bandstop Filter Only'};
 
-% 3. Series RLC Bandpass Filter Transfer Function: (R/L)*s / (s^2 + (R/L)*s + 1/LC)
-num_bp = [R/L, 0];
-den_bp = [1, R/L, 1/(L*C)];
-sys_bp = tf(num_bp, den_bp);
+choice = menu('Select the Filter to Simulate:', filter_options);
 
-% 4. Series RLC Bandstop Filter Transfer Function: (s^2 + 1/LC) / (s^2 + (R/L)*s + 1/LC)
-num_bs = [1, 0, 1/(L*C)];
-den_bs = [1, R/L, 1/(L*C)];
-sys_bs = tf(num_bs, den_bs);
-
-% --- Configure Bode Options for Linear Magnitude ---
-opts = bodeoptions;
-opts.MagUnits = 'abs';
-opts.MagScale = 'linear';
-
-% Plot and Compare Responses using the custom configuration
-figure('Name', 'Interactive Filter Analysis', 'NumberTitle', 'off');
-bodeplot(sys_lp, 'r', sys_hp, 'b', sys_bp, 'g', sys_bs, 'm', opts);
-grid on;
-legend('Low-Pass (RC)', 'High-Pass (RC)', 'Bandpass (RLC)', 'Bandstop (RLC)');
-title('Waveform Analysis Filter Generator');
+% Assign selected system model based on user menu choice
+switch choice
+    case 1, sys_active = sys_lp; filter_name = 'Low-Pass';
+    case 2, sys_active = sys_hp; filter_name = 'High-Pass';
+    case 3, sys_active = sys_bp; filter_name = 'Bandpass';
+    case 4, sys_active = sys_bs; filter_name = 'Bandstop';
+    otherwise
+        disp('Simulation canceled by user.');
+        return;
 end
+
+% --- Simulate the System Response ---
+output_signal = lsim(sys_active, input_signal, t);
+
+% --- Plot Waveforms in Separated Graphs ---
+figure('Name', ['Separated Waveforms: ' filter_name], 'NumberTitle', 'off');
+
+% Subplot 1: Input Voltage Waveform (Top)
+subplot(2, 1, 1);
+plot(t, input_signal, 'b-', 'LineWidth', 1.2);
+grid on;
+ylabel('Voltage (V)');
+title(sprintf('Input Voltage Waveform (Vin) - Chirp: %.0f Hz to %.0f Hz', f_start, f_end));
+legend('Input Signal', 'Location', 'best');
+
+% Subplot 2: Output Voltage Waveform (Bottom)
+subplot(2, 1, 2);
+plot(t, output_signal, 'r-', 'LineWidth', 1.2);
+grid on;
+xlabel('Time (seconds)');
+ylabel('Voltage (V)');
+title(sprintf('%s Filter: Output Voltage Waveform (Vout)', filter_name));
+legend('Filtered Output', 'Location', 'best');
+
+% Link the X-axes together so zooming/panning on one updates the other instantly
+linkaxes(get(gcf, 'Children'), 'x');
